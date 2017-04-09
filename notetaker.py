@@ -1,9 +1,16 @@
 #! python3
 import sys
+import datetime as dt
+import logging
+import faulthandler
+from functools import partial
 from PyQt5 import QtCore, QtGui, QtWidgets
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy import Column, Integer, String, DateTime, LargeBinary, create_engine
+from sqlalchemy import Column, Integer, String, DateTime, LargeBinary, ForeignKey, create_engine, or_
 from sqlalchemy.orm import sessionmaker
+
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger('notetaker')
 
 Base = declarative_base()
 
@@ -16,7 +23,7 @@ class User(Base):
     pwhash = Column(String)
 
     def __repr__(self):
-       return "<User(username='{}', pwhash='{}')>".format(self.username, self.pwhash)
+        return "<User(username='{}', pwhash='{}')>".format(self.username, self.pwhash)
 
        
 class Note(Base):
@@ -26,10 +33,15 @@ class Note(Base):
     id = Column(Integer, primary_key=True)
     datetime = Column(DateTime)
     text = Column(String)
-    user = Column(String)
+    user = Column(String, ForeignKey('user.username'))
+    last_update = Column(DateTime)
     
     def __repr__(self):
-        return "<Note(dateime='{}', text='{}', user='{}')>".format(self.dateime, self.text, self.user)
+        return "<Note(datetime='{}', text='{}', user='{}', last_update='{}')>"\
+            .format(self.datetime, self.text, self.user, self.last_update)
+
+    def __getitem__(self, item):
+        return (self.datetime, self.text, self.user, self.last_update)[item]
 
 
 class Attachment(Base):
@@ -64,37 +76,40 @@ class Log(Base):
 
 class NoteTaker(QtWidgets.QMainWindow):
 
-    '''
-    NoteTaker is a multi-user note-taking application that stores notes from multiple users into a single central location asynchronously. The application automatically attaches a timestamp to committed messages and updates all connected clients with the latest messages. It supports plain text editing and can parse MultiMarkdown to display tables and inline images NoteTaker also supports arbitrary attachments.
-    '''
+    """
+    NoteTaker is a multi-user note-taking application that stores notes from multiple users into a single central 
+    location asynchronously. The application automatically attaches a timestamp to committed messages and updates 
+    all connected clients with the latest messages. It supports plain text editing and can parse MultiMarkdown to 
+    display tables and inline images. NoteTaker also supports arbitrary attachments.
+    """
 
     version = '0.0.1'
 
     def __init__(self, parent=None):
         super(NoteTaker, self).__init__(parent)
 
+        self.db_type = 'sqlite:///'
+
+        self.current_user = 'rkain'
+
         # Build the UI
         self.setup_ui()
 
         # String that is prepended to the database address listed in the dbconfig text entry
-        self.db_type = 'sqlite:///'
 
-        try:
-            engine = create_engine(self.db_type + self.dbconfigLineEdit.text(), echo=True)
-        except:
-            raise
-        else:
-            self.dbSession = sessionmaker(bind=engine)
+        # TODO: Create dialog or other username/pw combo entry. Validate user info with user table
 
-        # TODO: Allow for editing or inserting new notes
+        # TODO: Automatically check for updates to notes
+
+        # TODO: Allow editing or inserting new notes
 
         # TODO: Attachment mechanism to support one or more arbitrary file types. Support drag and drop.
         
     def setup_ui(self):
         # TODO: Create a "find as you type" field to filter notes
-    
+
         # Set up basic dimensions and central layout
-        self.setObjectName("NoteTaker")
+        self.setWindowTitle("NoteTaker")
         self.resize(850, 600)
         self.centralwidget = QtWidgets.QWidget(self)
         self.verticalLayout = QtWidgets.QVBoxLayout(self.centralwidget)
@@ -102,8 +117,6 @@ class NoteTaker(QtWidgets.QMainWindow):
         # Define database configuration widget
         self.dbconfigFrame = QtWidgets.QFrame(self.centralwidget)
         self.dbconfigFrame.setMaximumSize(QtCore.QSize(16777215, 45))
-        # self.dbconfigFrame.setFrameShape(QtWidgets.QFrame.StyledPanel)
-        # self.dbconfigFrame.setFrameShadow(QtWidgets.QFrame.Raised)
         self.dbconfigHorizontalLayout = QtWidgets.QHBoxLayout(self.dbconfigFrame)
         self.dbconfigHorizontalLayout.setContentsMargins(0, -1, -1, -1)
         self.dbconfigLabel = QtWidgets.QLabel(self.dbconfigFrame)
@@ -111,11 +124,22 @@ class NoteTaker(QtWidgets.QMainWindow):
         self.dbconfigHorizontalLayout.addWidget(self.dbconfigLabel)
         self.dbconfigLineEdit = QtWidgets.QLineEdit(self.dbconfigFrame)
         # TODO: Remember database from previous session and open automatically
+        # TODO: Make this field an editable dropdown that remembers up to N previous databases
+        # TODO: Add a Browse button to locate a database
         self.dbconfigLineEdit.setText('notes.db')
+        # Set up data model
+        self.sourceTableModel = NoteTakerTableModel(self.db_type, self.dbconfigLineEdit.text())
+        self.proxyTableModel = NoteTakerSortFilterProxyModel()
+        self.proxyTableModel.setSourceModel(self.sourceTableModel)
         # TODO: Add dropdown to select db type (or detect automatically)
         self.dbconfigHorizontalLayout.addWidget(self.dbconfigLineEdit)
+        self.browseDatabaseButton = QtWidgets.QPushButton(self.dbconfigFrame)
+        self.browseDatabaseButton.setText('Browse for database')
+        self.browseDatabaseButton.clicked.connect(self.browse_db_connection)
+        self.dbconfigHorizontalLayout.addWidget(self.browseDatabaseButton)
         self.loadDatabaseButton = QtWidgets.QPushButton(self.dbconfigFrame)
-        self.loadDatabaseButton.setText('Load database')
+        self.loadDatabaseButton.setText('Load selected database')
+        self.loadDatabaseButton.clicked.connect(self.load_database)
         self.dbconfigHorizontalLayout.addWidget(self.loadDatabaseButton)
         self.verticalLayout.addWidget(self.dbconfigFrame)
 
@@ -128,7 +152,9 @@ class NoteTaker(QtWidgets.QMainWindow):
         self.filterHorizontalLabel.setText('Filter')
         self.filterHorizontalLayout.addWidget(self.filterHorizontalLabel)
         self.filterLineEdit = QtWidgets.QLineEdit(self.filterFrame)
-        self.filterLineEdit.textChanged.connect(self.updateTableView)
+        # TODO: Updating text on change is not network friendly! Better solution might be to cache database and filter as needed locally
+        # Alternatively, add a checkbox to optionally disable find-as-you-type and instead accept Enter/submit button to trigger filter
+        self.filterLineEdit.textChanged.connect(self.proxyTableModel.update_table_view)
         self.filterHorizontalLayout.addWidget(self.filterLineEdit)
         self.verticalLayout.addWidget(self.filterFrame)
 
@@ -137,20 +163,25 @@ class NoteTaker(QtWidgets.QMainWindow):
         self.splitter.setOrientation(QtCore.Qt.Vertical)
         self.splitter.setHandleWidth(10)
         self.splitter.setChildrenCollapsible(False)
-        self.tableWidget = QtWidgets.QTableWidget(self.splitter)
-        self.tableWidget.setColumnCount(0)
-        self.tableWidget.setRowCount(0)
-        self.dbconfigFrame = QtWidgets.QFrame(self.splitter)
-        self.dbconfigFrame.setFrameShape(QtWidgets.QFrame.StyledPanel)
-        self.dbconfigFrame.setFrameShadow(QtWidgets.QFrame.Raised)
-        self.horizontalLayout = QtWidgets.QHBoxLayout(self.dbconfigFrame)
+        self.tableView = QtWidgets.QTableView(self.splitter)
+        self.tableView.setModel(self.proxyTableModel)
+        self.tableView.resizeColumnsToContents()
+        self.tableView.horizontalHeader().setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
+        # self.tableView.setHorizontalHeader(self.sourceTableModel.header)
+        self.noteFrame = QtWidgets.QFrame(self.splitter)
+        self.noteFrame.setFrameShape(QtWidgets.QFrame.StyledPanel)
+        self.noteFrame.setFrameShadow(QtWidgets.QFrame.Raised)
+        self.horizontalLayout = QtWidgets.QHBoxLayout(self.noteFrame)
         self.horizontalLayout.setContentsMargins(0, -1, -1, -1)
-        self.textEdit = QtWidgets.QPlainTextEdit(self.dbconfigFrame)
-        # TODO: Set textEdit as a monospace typeface
+        self.textEdit = QtWidgets.QPlainTextEdit(self.noteFrame)
+        self.textEdit.setFont(QtGui.QFont('Courier New'))   # Probably not cross platform
         self.textEdit.viewport().setProperty("cursor", QtGui.QCursor(QtCore.Qt.IBeamCursor))
         self.horizontalLayout.addWidget(self.textEdit)
-        self.commitButton = QtWidgets.QPushButton(self.dbconfigFrame)
+        self.commitButton = QtWidgets.QPushButton(self.noteFrame)
         self.commitButton.setText('Commit')
+        self.commitButton.clicked.connect(self.sourceTableModel.commit_new_note)
+        QtWidgets.QShortcut(QtGui.QKeySequence('Ctrl+Return'), self, self.sourceTableModel.commit_new_note)
+        QtWidgets.QShortcut(QtGui.QKeySequence('Ctrl+Enter'), self, self.sourceTableModel.commit_new_note)
         self.horizontalLayout.addWidget(self.commitButton)
         self.verticalLayout.addWidget(self.splitter)
 
@@ -158,6 +189,7 @@ class NoteTaker(QtWidgets.QMainWindow):
         self.statusbar = QtWidgets.QStatusBar(self)
         self.setStatusBar(self.statusbar)
 
+        # TODO: Allow user to create custom hotkey-able buttons to insert common text e.g. "Test complete. Pass"
         self.toolBar = QtWidgets.QToolBar(self)
         self.addToolBar(QtCore.Qt.TopToolBarArea, self.toolBar)
 
@@ -182,7 +214,7 @@ class NoteTaker(QtWidgets.QMainWindow):
         self.actionExit = QtWidgets.QAction('&Exit', self)
         self.actionExit.setShortcut('Ctrl+Q')
         self.actionExit.setStatusTip('Exit application')
-        self.actionExit.triggered.connect(self.close)
+        self.actionExit.triggered.connect(self._exit)
 
         # Edit menu options
         self.actionPrefs = QtWidgets.QAction('&Preferences', self)
@@ -209,8 +241,21 @@ class NoteTaker(QtWidgets.QMainWindow):
 
         self.setCentralWidget(self.centralwidget)
 
-    def updateTableView(self):
-        self.statusbar.showMessage('Entered text "{}"'.format(self.filterLineEdit.text()), 2000)
+    def browse_db_connection(self):
+        # TODO: Implement open dialog box
+        pass
+
+    def load_database(self):
+        self.proxyTableModel.initiate_db_connection(self.db_type, self.dbconfigLineEdit.text())
+
+    def closeEvent(self, *args, **kwargs):
+        # Catch all types of close events to handle database closing gracefully
+        self._exit()
+
+    def _exit(self):
+        logging.debug('Closing database sessions')
+        self.sourceTableModel.close()
+        self.close()
 
     def _about(self):
         '''
@@ -220,8 +265,129 @@ class NoteTaker(QtWidgets.QMainWindow):
         QtWidgets.QMessageBox.about(self, 'About NoteTaker Tool', 'Python NoteTaker Tool'
                                                           '\nVersion {}'
                                                           '\nCopyright 2017'.format(self.version))
-                                                          
+
+
+class NoteTakerSortFilterProxyModel(QtCore.QSortFilterProxyModel):
+    def __init__(self, parent=None):
+        super(NoteTakerSortFilterProxyModel, self).__init__(parent)
+        # Currently passes everything through without filtering.
+
+    def update_table_view(self):
+        pass
+
+
+class NoteTakerTableModel(QtCore.QAbstractTableModel):
+    # http://pyqt.sourceforge.net/Docs/PyQt4/qabstracttablemodel.html
+
+    def __init__(self, db_type, db, parent=None):
+        super(NoteTakerTableModel, self).__init__(parent)
+        self.session = None
+        self.datatable = None
+        self.header = ('Creation Date', 'Text', 'User', 'Last Modified')
+
+        self.initiate_db_connection(db_type, db)
+
+    def initiate_db_connection(self, db_type, db):
+        # Connect to the database specified
+        # TODO: Check for existence of db, if not present ask user if they wish to create
+        try:
+            engine = create_engine(db_type + db, echo=True)
+            dbSession = sessionmaker(bind=engine)
+            self.session = dbSession()
+        except:
+            # Not sure yet what error types we might encounter, so raise everything for now
+            raise
+        else:
+            # TODO: Update GUI with db connection status
+            # self.statusbar.showMessage('Successfully connected to {}'.format(db), 5000)
+            # self.setWindowTitle('{} - {}'.format('NoteTaker', db))
+            # self.update_table_view()
+            self.refresh_data()
+            logger.debug('Completed db connection')
+            pass
+
+    def commit_new_note(self):
+        logger.debug('Initiating commit of new note')
+        self.statusbar.showMessage('Committing note', 2000)
+        # TODO: Check for any attachments and add if present
+        datetime = dt.datetime.now()
+        text = self.textEdit.toPlainText()
+        user = self.current_user
+        logger.debug('Trying to add note "{}", "{}", "{}"'.format(datetime, text, user))
+        note = Note(datetime=datetime, text=text, user=user, last_update=datetime)
+        try:
+            self.session.add(note)
+            self.session.commit()
+        except Exception as e:
+            logger.error('Failed to commit: {}'.format(repr(e)))
+            raise
+        else:
+            self.textEdit.clear()
+            self.update_table_view()
+
+    def update_table_view(self):
+        # self.statusbar.showMessage('Updating table view', 1000)
+        # Query the database for notes
+        # filter_text = self.filterLineEdit.text()
+        # if filter_text:
+        #     # If user typed text for filtering, filter based on all available parameters
+        #     rowlist = [r for r in self.session.query(Note).\
+        #         filter(or_(Note.text.ilike('%{}%'.format(filter_text)),
+        #                    Note.user.ilike('%{}%'.format(filter_text)),
+        #                    Note.datetime.ilike('%{}%'.format(filter_text)),
+        #                    Note.last_update.ilike('%{}%'.format(filter_text)))).\
+        #         order_by(Note.datetime)]
+        # else:
+        #     rowlist = [r for r in self.session.query(Note).order_by(Note.datetime)]
+        # for r in rowlist:
+        #     print(repr(r))
+        pass
+
+    def refresh_data(self):
+        # TODO: Add timer to refresh data automatically. Add option to set time in preferences dialog
+        try:
+            self.datatable = [d for d in self.session.query(Note).all()]
+        except AttributeError:
+            pass
+        else:
+            logging.debug(repr(self.datatable))
+
+    def rowCount(self, parent=QtCore.QModelIndex(), *args, **kwargs):
+        try:
+            # count = self.session.query(Note).count()
+            count = len(self.datatable)
+        except AttributeError:
+            return 0
+        else:
+            logging.debug('Number of rows: {}'.format(count))
+            return count
+
+    def columnCount(self, parent=QtCore.QModelIndex(), *args, **kwargs):
+        return len(self.header)
+
+    def headerData(self, p_int, orientation=QtCore.Qt.Horizontal, role=QtCore.Qt.DisplayRole):
+        if role == QtCore.Qt.DisplayRole and orientation == QtCore.Qt.Horizontal:
+            return self.header[p_int]
+
+    def data(self, QModelIndex, role=QtCore.Qt.DisplayRole):
+        if role == QtCore.Qt.DisplayRole:
+            i = QModelIndex.row()
+            j = QModelIndex.column()
+            return '{}'.format(self.datatable[i][j])
+        else:
+            return QtCore.QVariant()
+
+    def flags(self, QModelIndex):
+        return QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled
+
+    def close(self):
+        self.session.close()
+
+
 if __name__ == '__main__':
+
+    logfile = open('faulthandler.log', 'a')
+    fh = faulthandler.enable(logfile)
 
     # Connect to an existing QApplication instance if using interactive console
     try:
