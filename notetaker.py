@@ -1,6 +1,5 @@
 #! python3
 import sys
-import datetime
 from PyQt5 import QtCore, QtGui, QtWidgets
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import Column, Integer, String, DateTime, LargeBinary, create_engine
@@ -77,10 +76,15 @@ class NoteTaker(QtWidgets.QMainWindow):
         # Build the UI
         self.setup_ui()
 
-        # TODO: Create database connection
-        engine = create_engine('notes.db', echo=True)
-        
-        Session = sessionmaker(bind=engine)
+        # String that is prepended to the database address listed in the dbconfig text entry
+        self.db_type = 'sqlite:///'
+
+        try:
+            engine = create_engine(self.db_type + self.dbconfigLineEdit.text(), echo=True)
+        except:
+            raise
+        else:
+            self.dbSession = sessionmaker(bind=engine)
 
         # TODO: Allow for editing or inserting new notes
 
@@ -94,25 +98,41 @@ class NoteTaker(QtWidgets.QMainWindow):
         self.resize(850, 600)
         self.centralwidget = QtWidgets.QWidget(self)
         self.verticalLayout = QtWidgets.QVBoxLayout(self.centralwidget)
-        self.frame = QtWidgets.QFrame(self.centralwidget)
-        self.frame.setMaximumSize(QtCore.QSize(16777215, 45))
-        self.frame.setFrameShape(QtWidgets.QFrame.StyledPanel)
-        self.frame.setFrameShadow(QtWidgets.QFrame.Raised)
 
         # Define database configuration widget
-        self.horizontalLayout_2 = QtWidgets.QHBoxLayout(self.frame)
-        self.horizontalLayout_2.setContentsMargins(0, -1, -1, -1)
-        self.label = QtWidgets.QLabel(self.frame)
-        self.label.setText('Notes Database Path')
-        self.horizontalLayout_2.addWidget(self.label)
-        self.lineEdit = QtWidgets.QLineEdit(self.frame)
-        self.horizontalLayout_2.addWidget(self.lineEdit)
-        self.loadDatabaseButton = QtWidgets.QPushButton(self.frame)
+        self.dbconfigFrame = QtWidgets.QFrame(self.centralwidget)
+        self.dbconfigFrame.setMaximumSize(QtCore.QSize(16777215, 45))
+        # self.dbconfigFrame.setFrameShape(QtWidgets.QFrame.StyledPanel)
+        # self.dbconfigFrame.setFrameShadow(QtWidgets.QFrame.Raised)
+        self.dbconfigHorizontalLayout = QtWidgets.QHBoxLayout(self.dbconfigFrame)
+        self.dbconfigHorizontalLayout.setContentsMargins(0, -1, -1, -1)
+        self.dbconfigLabel = QtWidgets.QLabel(self.dbconfigFrame)
+        self.dbconfigLabel.setText('Notes Database Path')
+        self.dbconfigHorizontalLayout.addWidget(self.dbconfigLabel)
+        self.dbconfigLineEdit = QtWidgets.QLineEdit(self.dbconfigFrame)
+        # TODO: Remember database from previous session and open automatically
+        self.dbconfigLineEdit.setText('notes.db')
+        # TODO: Add dropdown to select db type (or detect automatically)
+        self.dbconfigHorizontalLayout.addWidget(self.dbconfigLineEdit)
+        self.loadDatabaseButton = QtWidgets.QPushButton(self.dbconfigFrame)
         self.loadDatabaseButton.setText('Load database')
-        self.horizontalLayout_2.addWidget(self.loadDatabaseButton)
+        self.dbconfigHorizontalLayout.addWidget(self.loadDatabaseButton)
+        self.verticalLayout.addWidget(self.dbconfigFrame)
+
+        # Define text filter
+        self.filterFrame = QtWidgets.QFrame(self.centralwidget)
+        self.filterFrame.setMaximumSize(QtCore.QSize(16777215, 45))
+        self.filterHorizontalLayout = QtWidgets.QHBoxLayout(self.filterFrame)
+        self.filterHorizontalLayout.setContentsMargins(0, -1, -1, -1)
+        self.filterHorizontalLabel = QtWidgets.QLabel(self.filterFrame)
+        self.filterHorizontalLabel.setText('Filter')
+        self.filterHorizontalLayout.addWidget(self.filterHorizontalLabel)
+        self.filterLineEdit = QtWidgets.QLineEdit(self.filterFrame)
+        self.filterLineEdit.textChanged.connect(self.updateTableView)
+        self.filterHorizontalLayout.addWidget(self.filterLineEdit)
+        self.verticalLayout.addWidget(self.filterFrame)
 
         # Define View and Edit windows
-        self.verticalLayout.addWidget(self.frame)
         self.splitter = QtWidgets.QSplitter(self.centralwidget)
         self.splitter.setOrientation(QtCore.Qt.Vertical)
         self.splitter.setHandleWidth(10)
@@ -120,16 +140,16 @@ class NoteTaker(QtWidgets.QMainWindow):
         self.tableWidget = QtWidgets.QTableWidget(self.splitter)
         self.tableWidget.setColumnCount(0)
         self.tableWidget.setRowCount(0)
-        self.frame = QtWidgets.QFrame(self.splitter)
-        self.frame.setFrameShape(QtWidgets.QFrame.StyledPanel)
-        self.frame.setFrameShadow(QtWidgets.QFrame.Raised)
-        self.horizontalLayout = QtWidgets.QHBoxLayout(self.frame)
+        self.dbconfigFrame = QtWidgets.QFrame(self.splitter)
+        self.dbconfigFrame.setFrameShape(QtWidgets.QFrame.StyledPanel)
+        self.dbconfigFrame.setFrameShadow(QtWidgets.QFrame.Raised)
+        self.horizontalLayout = QtWidgets.QHBoxLayout(self.dbconfigFrame)
         self.horizontalLayout.setContentsMargins(0, -1, -1, -1)
-        self.textEdit = QtWidgets.QPlainTextEdit(self.frame)
+        self.textEdit = QtWidgets.QPlainTextEdit(self.dbconfigFrame)
         # TODO: Set textEdit as a monospace typeface
         self.textEdit.viewport().setProperty("cursor", QtGui.QCursor(QtCore.Qt.IBeamCursor))
         self.horizontalLayout.addWidget(self.textEdit)
-        self.commitButton = QtWidgets.QPushButton(self.frame)
+        self.commitButton = QtWidgets.QPushButton(self.dbconfigFrame)
         self.commitButton.setText('Commit')
         self.horizontalLayout.addWidget(self.commitButton)
         self.verticalLayout.addWidget(self.splitter)
@@ -188,6 +208,9 @@ class NoteTaker(QtWidgets.QMainWindow):
         self.menubar.addAction(self.menuHelp.menuAction())
 
         self.setCentralWidget(self.centralwidget)
+
+    def updateTableView(self):
+        self.statusbar.showMessage('Entered text "{}"'.format(self.filterLineEdit.text()), 2000)
 
     def _about(self):
         '''
