@@ -1,77 +1,11 @@
 #! python3
 import sys
-import datetime as dt
 import logging
-import faulthandler
-from passlib.hash import pbkdf2_sha256
 from PyQt5 import QtCore, QtGui, QtWidgets
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy import Column, Integer, String, DateTime, LargeBinary, ForeignKey, create_engine, or_
-from sqlalchemy.orm import sessionmaker
+from notetaker_db import NoteTakerSortFilterProxyModel, NoteTakerTableModel
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('notetaker')
-
-Base = declarative_base()
-
-
-class User(Base):
-    __tablename__ = 'user'
-
-    id = Column(Integer, primary_key=True)
-    username = Column(String)
-    pwhash = Column(String)
-
-    def __repr__(self):
-        return "<User(username='{}', pwhash='{}')>".format(self.username, self.pwhash)
-
-       
-class Note(Base):
-    __tablename__ = 'note'
-    
-    # Contains only the latest edited notes for any given item 
-    id = Column(Integer, primary_key=True)
-    datetime = Column(DateTime)
-    text = Column(String)
-    user = Column(String, ForeignKey('user.username'))
-    last_update = Column(DateTime)
-    
-    def __repr__(self):
-        return "<Note(datetime='{}', text='{}', user='{}', last_update='{}')>"\
-            .format(self.datetime, self.text, self.user, self.last_update)
-
-    def __getitem__(self, item):
-        return (self.datetime, self.text, self.user, self.last_update)[item]
-
-
-class Attachment(Base):
-    __tablename__ = 'attachment'
-    
-    id = Column(Integer, primary_key=True)
-    # Filename or other identifier
-    name = Column(String)
-    data = Column(LargeBinary)
-    # note_id is the id of the note with which this attachment is associated
-    note_id = Column(Integer)
-    
-    def __repr__(self):
-        return "<Attachment(name='{}', data='BINARY', note_id='{}')>".format(self.name, self.note_id)
-
-
-class Log(Base):
-    __tablename__ = 'log'
-    
-    # Log records every note transaction (both new and edits)
-    # Does not handle attachments
-    # TODO: Set up triggers to support automatic logging
-    id = Column(Integer, primary_key=True)
-    # timestamp when the insertion/edit was made
-    timestamp = Column(DateTime)
-    # text is the 
-    text = Column(String)
-
-    def __repr__(self):
-        return "<Log(timestamp='{}', text='{}')>".format(self.timestamp, self.text)
 
 
 class NoteTaker(QtWidgets.QMainWindow):
@@ -92,6 +26,7 @@ class NoteTaker(QtWidgets.QMainWindow):
 
         # TODO: Create dialog or other username/pw combo entry. Validate user info with user table
         self.current_user = None
+        self.current_db = None
 
         # Build the UI
         self.setup_ui()
@@ -106,7 +41,8 @@ class NoteTaker(QtWidgets.QMainWindow):
         
     def setup_ui(self):
         # Set up basic dimensions and central layout
-        self.setWindowTitle("NoteTaker")
+        self.program_title = 'NoteTaker'
+        self.setWindowTitle(self.program_title)
         self.resize(850, 600)
         self.centralwidget = QtWidgets.QWidget(self)
         self.verticalLayout = QtWidgets.QVBoxLayout(self.centralwidget)
@@ -265,12 +201,15 @@ class NoteTaker(QtWidgets.QMainWindow):
 
     def user_dialog(self):
         # TODO: Show currently logged in user in the GUI
+        # TODO: allow config file to populate table 'user' when a new database is generated
         login = Login()
         login.exec_()
         username, pw = login.get_creds()
 
         if self.sourceTableModel.is_valid_user(user=username, passwd=pw):
             self.current_user = username
+            self.statusbar.showMessage('Successfully logged in as "{}"'.format(self.current_user), 10000)
+            self.setWindowTitle('{} - {} - {}'.format(self.program_title, self.current_user, self.current_db))
         else:
             msg = QtWidgets.QMessageBox()
             msg.setIcon(QtWidgets.QMessageBox.Warning)
@@ -281,8 +220,11 @@ class NoteTaker(QtWidgets.QMainWindow):
 
     def load_database(self):
         result = self.sourceTableModel.initiate_db_connection(self.db_type, self.dbconfigLineEdit.text())
-        self.statusbar.showMessage(result)
-        self.tableView.scrollToBottom()
+        if result:
+            self.current_db = result
+            self.setWindowTitle('{} - {} - {}'.format(self.program_title, self.current_user, self.current_db))
+            self.statusbar.showMessage('Successfully connected to "{}"'.format(self.current_db), 10000)
+            self.tableView.scrollToBottom()
 
     def filter_view(self):
         filter_txt = self.filterLineEdit.text()
@@ -306,138 +248,6 @@ class NoteTaker(QtWidgets.QMainWindow):
         QtWidgets.QMessageBox.about(self, 'About NoteTaker Tool', 'Python NoteTaker Tool'
                                                           '\nVersion {}'
                                                           '\nCopyright 2017'.format(self.version))
-
-
-class NoteTakerSortFilterProxyModel(QtCore.QSortFilterProxyModel):
-    def __init__(self, parent=None):
-        super(NoteTakerSortFilterProxyModel, self).__init__(parent)
-        # Currently passes everything through without filtering.
-
-    def update_table_view(self, filter_txt):
-        search = QtCore.QRegExp(filter_txt, QtCore.Qt.CaseInsensitive, QtCore.QRegExp.Wildcard)
-        self.setFilterRegExp(search)
-        self.setFilterKeyColumn(1)
-
-
-class NoteTakerTableModel(QtCore.QAbstractTableModel):
-    # http://pyqt.sourceforge.net/Docs/PyQt4/qabstracttablemodel.html
-
-    def __init__(self, db_type, db, update_rate=2000, parent=None):
-        super(NoteTakerTableModel, self).__init__(parent)
-        self.session = None
-        self.datatable = None
-        self.header = ('Creation Date', 'Text', 'User', 'Last Modified')
-
-        self.initiate_db_connection(db_type, db)
-
-        self.dataUpdateTimer = QtCore.QTimer(self)
-        self.dataUpdateTimer.timeout.connect(self.refresh_data)
-        self.dataUpdateTimer.startTimer(update_rate)
-
-    def initiate_db_connection(self, db_type, db):
-        # Connect to the database specified
-        # TODO: Check for existence of db, if not present ask user if they wish to create
-        if self.session:
-            self.session.close()
-        try:
-            engine = create_engine(db_type + db, echo=True)
-            Base.metadata.create_all(engine)
-            dbSession = sessionmaker(bind=engine)
-            self.session = dbSession()
-        except:
-            # Not sure yet what error types we might encounter, so raise everything for now
-            raise
-        else:
-            # TODO: Update GUI with db connection status
-            # self.setWindowTitle('{} - {}'.format('NoteTaker', db))
-            # self.update_table_view()
-            self.refresh_data()
-            logger.debug('Completed db connection')
-            return 'Successfully connected to "{}"'.format(db)
-
-    def commit_new_note(self, text, user):
-        logger.debug('Initiating commit of new note')
-        # TODO: Check for any attachments and add if present
-        datetime = dt.datetime.now()
-        logger.debug('Trying to add note "{}", "{}", "{}"'.format(datetime, text, user))
-        note = Note(datetime=datetime, text=text, user=user, last_update=datetime)
-        try:
-            self.session.add(note)
-            self.session.commit()
-        except Exception as e:
-            logger.error('Failed to commit: {}'.format(repr(e)))
-            raise
-        else:
-            logger.info('Committed note')
-            self.refresh_data()
-            return 'Note Committed Successfully'
-
-    def update_table_view(self):
-        # self.statusbar.showMessage('Updating table view', 1000)
-        # Query the database for notes
-        # filter_text = self.filterLineEdit.text()
-        # if filter_text:
-        #     # If user typed text for filtering, filter based on all available parameters
-        #     rowlist = [r for r in self.session.query(Note).\
-        #         filter(or_(Note.text.ilike('%{}%'.format(filter_text)),
-        #                    Note.user.ilike('%{}%'.format(filter_text)),
-        #                    Note.datetime.ilike('%{}%'.format(filter_text)),
-        #                    Note.last_update.ilike('%{}%'.format(filter_text)))).\
-        #         order_by(Note.datetime)]
-        # else:
-        #     rowlist = [r for r in self.session.query(Note).order_by(Note.datetime)]
-        # for r in rowlist:
-        #     print(repr(r))
-        pass
-
-    def refresh_data(self):
-        # TODO: Add timer to refresh data automatically. Add option to set time in preferences dialog
-        try:
-            self.layoutAboutToBeChanged.emit()
-            self.datatable = [d for d in self.session.query(Note).order_by(Note.datetime).all()]
-        except AttributeError:
-            raise
-        else:
-            logger.debug('Fetched new data')
-            self.layoutChanged.emit()
-
-    def rowCount(self, parent=QtCore.QModelIndex(), *args, **kwargs):
-        try:
-            # count = self.session.query(Note).count()
-            count = len(self.datatable)
-        except AttributeError:
-            return 0
-        else:
-            return count
-
-    def columnCount(self, parent=QtCore.QModelIndex(), *args, **kwargs):
-        return len(self.header)
-
-    def headerData(self, p_int, orientation=QtCore.Qt.Horizontal, role=QtCore.Qt.DisplayRole):
-        if role == QtCore.Qt.DisplayRole and orientation == QtCore.Qt.Horizontal:
-            return self.header[p_int]
-
-    def data(self, QModelIndex, role=QtCore.Qt.DisplayRole):
-        if role == QtCore.Qt.DisplayRole:
-            i = QModelIndex.row()
-            j = QModelIndex.column()
-            return '{}'.format(self.datatable[i][j])
-        else:
-            return QtCore.QVariant()
-
-    def flags(self, QModelIndex):
-        # TODO: Allow copying
-        return QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled
-
-    def close(self):
-        self.session.close()
-
-    def is_valid_user(self, user, passwd):
-        for un, pwhash in self.session.query(User.username, User.pwhash).filter(User.username == user):
-            logger.debug('Found user in database. {}'.format(un))
-            # TODO: Fix static value
-            # return True
-            return pbkdf2_sha256.verify(passwd, pwhash)
 
 
 class Login(QtWidgets.QDialog):
@@ -483,9 +293,6 @@ class Login(QtWidgets.QDialog):
 
 
 if __name__ == '__main__':
-
-    logfile = open('faulthandler.log', 'a')
-    fh = faulthandler.enable(logfile)
 
     # Connect to an existing QApplication instance if using interactive console
     try:
