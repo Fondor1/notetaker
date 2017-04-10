@@ -341,6 +341,7 @@ class NoteTakerTableModel(QtCore.QAbstractTableModel):
             self.session.close()
         try:
             engine = create_engine(db_type + db, echo=True)
+            Base.metadata.create_all(engine)
             dbSession = sessionmaker(bind=engine)
             self.session = dbSession()
         except:
