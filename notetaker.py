@@ -1,6 +1,7 @@
 #! python3
 import sys
 import logging
+import os.path
 from PyQt5 import QtCore, QtGui, QtWidgets
 from notetaker_db import NoteTakerSortFilterProxyModel, NoteTakerTableModel
 
@@ -49,7 +50,7 @@ class NoteTaker(QtWidgets.QMainWindow):
 
         # Define database configuration widget
         self.dbconfigFrame = QtWidgets.QFrame(self.centralwidget)
-        self.dbconfigFrame.setMaximumSize(QtCore.QSize(16777215, 45))
+        # self.dbconfigFrame.setMaximumSize(QtCore.QSize(16777215, 55))
         self.dbconfigHorizontalLayout = QtWidgets.QHBoxLayout(self.dbconfigFrame)
         self.dbconfigHorizontalLayout.setContentsMargins(0, -1, -1, -1)
         self.dbconfigLabel = QtWidgets.QLabel(self.dbconfigFrame)
@@ -77,7 +78,7 @@ class NoteTaker(QtWidgets.QMainWindow):
 
         # Define text filter
         self.filterFrame = QtWidgets.QFrame(self.centralwidget)
-        self.filterFrame.setMaximumSize(QtCore.QSize(16777215, 45))
+        # self.filterFrame.setMaximumSize(QtCore.QSize(16777215, 55))
         self.filterHorizontalLayout = QtWidgets.QHBoxLayout(self.filterFrame)
         self.filterHorizontalLayout.setContentsMargins(0, -1, -1, -1)
         self.filterHorizontalLabel = QtWidgets.QLabel(self.filterFrame)
@@ -144,7 +145,7 @@ class NoteTaker(QtWidgets.QMainWindow):
         self.actionExport = QtWidgets.QAction(QtGui.QIcon.fromTheme("document-save-as"), '&Export Notes', self)
         self.actionExport.setShortcut('Ctrl+S')
         self.actionExport.setStatusTip('Export notes')
-        # self.actionSave.triggered.connect(self.onExportClicked)
+        self.actionExport.triggered.connect(self.onExportClicked)
 
         self.actionExit = QtWidgets.QAction('&Exit', self)
         self.actionExit.setShortcut('Ctrl+Q')
@@ -195,9 +196,32 @@ class NoteTaker(QtWidgets.QMainWindow):
             result = self.sourceTableModel.commit_new_note(self.textEdit.toPlainText(), self.current_user)
             self.textEdit.clear()
             self.statusbar.showMessage(result)
-            self.tableView.scrollToBottom()
+            self.tableView.resizeColumnToContents(0)
             self.tableView.resizeColumnToContents(2)
+            self.tableView.resizeColumnToContents(3)
             self.tableView.resizeRowsToContents()
+            self.tableView.scrollToBottom()
+            
+    def onExportClicked(self):
+        # TODO: Pop up a window if data is filtered and ask if user would like filtered or all data exported
+        if not self.filterLineEdit.text() == '':
+            msg = QtWidgets.QMessageBox()
+            msg.setIcon(QtWidgets.QMessageBox.Question)
+            msg.setText('The current view is filtered. Would you like to export the current data or all data?')
+            msg.setWindowTitle('Export Selection?')
+            msg.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No | QtWidgets.QMessageBox.Cancel)
+            msg.exec_()
+ 
+        path = QtWidgets.QFileDialog.getSaveFileName(self, 'Save File', '', 'CSV (*.csv)')
+        if not all(path):
+            # TODO: Determine why this isn't reached
+            if not os.path.exists(path):
+                # Validate the path
+                # Check for existing
+                # Ensure extension is added properly
+                # If all OK, pass to self.sourceTableModel.export_data(path)
+                logger.debug('Found a file to save to: {}'.format(path))
+            
 
     def user_dialog(self):
         # TODO: Show currently logged in user in the GUI

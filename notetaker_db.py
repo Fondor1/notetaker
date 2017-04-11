@@ -1,4 +1,5 @@
 import logging
+import csv
 import datetime as dt
 from PyQt5 import QtCore, QtGui, QtWidgets
 from sqlalchemy.ext.declarative import declarative_base
@@ -81,6 +82,11 @@ class NoteTakerSortFilterProxyModel(QtCore.QSortFilterProxyModel):
         search = QtCore.QRegExp(filter_txt, QtCore.Qt.CaseInsensitive, QtCore.QRegExp.Wildcard)
         self.setFilterRegExp(search)
         self.setFilterKeyColumn(1)
+        
+    def export_data_filt(self):
+        for row in range(self.rowCount()):
+            for col in range(self.colCount()):
+                pass
 
 
 class NoteTakerTableModel(QtCore.QAbstractTableModel):
@@ -90,7 +96,7 @@ class NoteTakerTableModel(QtCore.QAbstractTableModel):
         """
         super(NoteTakerTableModel, self).__init__(parent)
         self.session = None
-        self.datatable = None
+        self.datatable = [[]]
         self.header = ('Creation Date', 'Text', 'User', 'Last Modified')
 
         self.initiate_db_connection(db_type, db)
@@ -146,6 +152,19 @@ class NoteTakerTableModel(QtCore.QAbstractTableModel):
             logger.debug('Fetched new data')
             self.layoutChanged.emit()
 
+    def export_data(self, path):
+        # Export table data to csv. Assumes path is valid and will be overwritten if exists
+        with open(path, 'wb') as stream:
+            writer = csv.writer(stream)
+            rowcount = len(self.datatable)
+            colcount = len(self.datatable[0])
+            for row in range(rowcount):
+                rowdata = []
+                for column in range(colcount):
+                    item = self.datatable[row][column]
+                    rowdata.append(item)
+                writer.writerow(rowdata)
+            
     def rowCount(self, parent=QtCore.QModelIndex(), *args, **kwargs):
         try:
             # count = self.session.query(Note).count()
@@ -171,7 +190,6 @@ class NoteTakerTableModel(QtCore.QAbstractTableModel):
             return QtCore.QVariant()
 
     def flags(self, QModelIndex):
-        # TODO: Allow copying
         return QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled
 
     def close(self):
@@ -180,6 +198,4 @@ class NoteTakerTableModel(QtCore.QAbstractTableModel):
     def is_valid_user(self, user, passwd):
         for un, pwhash in self.session.query(User.username, User.pwhash).filter(User.username == user):
             logger.debug('Found user in database. {}'.format(un))
-            # TODO: Fix static value
-            # return True
             return pbkdf2_sha256.verify(passwd, pwhash)
