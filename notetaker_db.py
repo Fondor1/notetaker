@@ -77,16 +77,25 @@ class NoteTakerSortFilterProxyModel(QtCore.QSortFilterProxyModel):
         Model used to filter the NoteTakerTableModel based on user entries
         """
         super(NoteTakerSortFilterProxyModel, self).__init__(parent)
+        self.header = ('Creation Date', 'Text', 'User', 'Last Modified')
 
     def update_table_view(self, filter_txt):
         search = QtCore.QRegExp(filter_txt, QtCore.Qt.CaseInsensitive, QtCore.QRegExp.Wildcard)
         self.setFilterRegExp(search)
         self.setFilterKeyColumn(1)
         
-    def export_data_filt(self):
+    def export_data_filt(self, path):
+        export_list = []
         for row in range(self.rowCount()):
-            for col in range(self.colCount()):
-                pass
+            rowdata = {}
+            for col in range(self.columnCount()):
+                rowdata[self.header[col]] = self.data(self.createIndex(row, col))
+            export_list.append(rowdata)
+        with open(path, 'w') as fl:
+            writer = csv.DictWriter(fl, fieldnames=self.header)
+            writer.writeHeader()
+            for line in rowdata:
+                writer.writeline(line)                
 
 
 class NoteTakerTableModel(QtCore.QAbstractTableModel):

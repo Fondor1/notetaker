@@ -137,10 +137,10 @@ class NoteTaker(QtWidgets.QMainWindow):
         self.setMenuBar(self.menubar)
 
         # File menu options
-        self.actionLoad = QtWidgets.QAction(QtGui.QIcon.fromTheme("document-open"), '&Load Config', self)
+        self.actionLoad = QtWidgets.QAction(QtGui.QIcon.fromTheme("document-open"), '&Load Database', self)
         self.actionLoad.setShortcut('Ctrl+L')
         self.actionLoad.setStatusTip('Load a NoteTaker database')
-        # self.actionLoad.triggered.connect(self.onLoadClicked)
+        self.actionLoad.triggered.connect(self.browse_db_connection)
 
         self.actionExport = QtWidgets.QAction(QtGui.QIcon.fromTheme("document-save-as"), '&Export Notes', self)
         self.actionExport.setShortcut('Ctrl+S')
@@ -207,20 +207,53 @@ class NoteTaker(QtWidgets.QMainWindow):
         if not self.filterLineEdit.text() == '':
             msg = QtWidgets.QMessageBox()
             msg.setIcon(QtWidgets.QMessageBox.Question)
-            msg.setText('The current view is filtered. Would you like to export the current data or all data?')
+            msg.setText('The current view is filtered. Select Yes to export only the visible data or No to export all available data.')
             msg.setWindowTitle('Export Selection?')
             msg.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No | QtWidgets.QMessageBox.Cancel)
-            msg.exec_()
+            result = msg.exec_()
+            if result == QtWidgets.QMessageBox.Yes:
+                export_flag = 'filtered'
+            elif result == QtWidgets.QMessageBox.No:
+                export_flag = 'all'
+            else:
+                logger.debug('User cancelled save')
+                return
  
-        path = QtWidgets.QFileDialog.getSaveFileName(self, 'Save File', '', 'CSV (*.csv)')
-        if not all(path):
-            # TODO: Determine why this isn't reached
-            if not os.path.exists(path):
-                # Validate the path
+        path = QtWidgets.QFileDialog.getSaveFileName(self, 'Save File', '', 'CSV (*.csv)')[0]
+        if path != '':
+            if os.path.exists(path):
                 # Check for existing
                 # Ensure extension is added properly
                 # If all OK, pass to self.sourceTableModel.export_data(path)
-                logger.debug('Found a file to save to: {}'.format(path))
+                repeat = True
+                while repeat and path != '':
+                    # Path exists, overwrite?
+                    msg = QtWidgets.QMessageBox()
+                    msg.setIcon(QtWidgets.QMessageBox.Question)
+                    msg.setText('The file "{}" already exists. Overwrite?')
+                    msg.setWindowTitle('Overwrite existing file?')
+                    msg.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No | QtWidgets.QMessageBox.Cancel)
+                    result = msg.exec_()
+                    # Handle choice. If cancel, stop. If Yes, overwrite, if no, prompt for new
+                    if result == QtWidgets.QMessageBox.Yes:
+                        repeat = False
+                    elif result == QtWidgets.QMessageBox.No:
+                        path = QtWidgets.QFileDialog.getSaveFileName(self, 'Save File', '', 'CSV (*.csv)')[0]
+                    else:
+                        logger.debug('User cancelled save')
+                        return
+            
+            logger.debug('Found a file to save to: {}'.format(path))
+            if export_flag == 'filtered':
+                self.proxyTableModel.export_data_filt(path)
+            elif export_flag == 'all':
+                self.sourceTableModel.export_data(path)
+            else:
+                logger.warning('Export option "{}" not configured'.format(repr(export_flag)))
+            
+            
+        else:
+            logger.debug('User cancelled save')
             
 
     def user_dialog(self):
