@@ -2,7 +2,7 @@
 import sys
 import logging
 import os.path
-from PyQt5 import QtCore, QtGui, QtWidgets
+from Qt import QtCore, QtGui, QtWidgets
 from notetaker_db import NoteTakerSortFilterProxyModel, NoteTakerTableModel
 
 logging.basicConfig(level=logging.DEBUG)
@@ -25,14 +25,12 @@ class NoteTaker(QtWidgets.QMainWindow):
 
         self.db_type = 'sqlite:///'
 
-        # TODO: Create dialog or other username/pw combo entry. Validate user info with user table
+        # TODO: Support opening a db based on passed-in arguments
         self.current_user = None
         self.current_db = None
 
         # Build the UI
         self.setup_ui()
-
-        # String that is prepended to the database address listed in the dbconfig text entry
 
         # TODO: Automatically check for updates to notes
 
@@ -109,10 +107,13 @@ class NoteTaker(QtWidgets.QMainWindow):
         self.noteFrame.setFrameShadow(QtWidgets.QFrame.Raised)
         self.horizontalLayout = QtWidgets.QHBoxLayout(self.noteFrame)
         self.horizontalLayout.setContentsMargins(0, -1, -1, -1)
-        self.textEdit = QtWidgets.QPlainTextEdit(self.noteFrame)
+        self.textEdit = PlainTextEditWithAttachments(self.noteFrame)
         self.textEdit.setFont(QtGui.QFont('Courier New'))   # Probably not cross platform
         self.textEdit.viewport().setProperty("cursor", QtGui.QCursor(QtCore.Qt.IBeamCursor))
         self.horizontalLayout.addWidget(self.textEdit)
+        self.attachmentWidget = QtWidgets.QListWidget()
+        self.attachmentWidget.hide()
+        self.horizontalLayout.addWidget(self.attachmentWidget)
         self.commitButton = QtWidgets.QPushButton(self.noteFrame)
         self.commitButton.setText('Commit')
         self.commitButton.clicked.connect(self.commit_new_note)
@@ -192,8 +193,8 @@ class NoteTaker(QtWidgets.QMainWindow):
             self.user_dialog()
             attempts += 1
 
-        if self.current_user:
-            result = self.sourceTableModel.commit_new_note(self.textEdit.toPlainText(), self.current_user)
+        if self.current_user:  # If someone is properly logged in
+            result = self.sourceTableModel.commit_new_note(self.textEdit.toPlainText(), self.current_user, )
             self.textEdit.clear()
             self.statusbar.showMessage(result)
             self.tableView.resizeColumnToContents(0)
@@ -307,6 +308,72 @@ class NoteTaker(QtWidgets.QMainWindow):
                                                           '\nCopyright 2017'.format(self.version))
 
 
+class PlainTextEditWithAttachments(QtWidgets.QPlainTextEdit):
+    def __init__(self, parent=None):
+        """
+        Creates a PlainText edit box that supports arbitrary attachments
+        """
+        super(PlainTextEditWithAttachments, self).__init__(parent)
+        self.setAcceptDrops(True)
+        
+    def dragEnterEvent(self, e):
+        e.accept()
+
+    def dropEvent(self, e):
+
+        # position = e.pos()
+        # self.btn.move(position)
+
+        # e.setDropAction(QtCore.Qt.MoveAction)
+        logger.debug(repr(e.mimeData))
+        e.accept()
+        
+                if e.mimeData().hasFormat('text/uri-list'):
+            files = str(e.mimeData().data('text/uri-list')).split('\r\n')
+            files = [f.rstrip('\x00\r\n').replace('file:///', '') for f in files]
+            for f in files:
+                if f:
+                    ext = os.path.splitext(f)[1].lower()
+                    if ext in ['.xls', '.xlsx', '.txt']:
+                        e.accept()
+                        return
+                    if ext == '.txt':
+                        e.accept()
+                        return
+            e.ignore()
+
+class listWidget(QtWidgets.QListWidget):
+    def __init__(self, parent=None):
+        """
+        Creates a list widget with custom key handlers
+        """
+        
+    def keyPressEvent(self, e):
+        """Overrides keyPressEvent of QListWidget.
+ 
+        https://deptinfo-ensip.univ-poitiers.fr/ENS/pyside-docs/PySide/QtGui/QKeyEvent.html#PySide.QtGui.QKeyEvent
+        Args:
+            e: type QKeyEvent.
+        """
+        
+        # TODO: Ensure this works for listWidgets. Was originally written for a QTableView
+        if e.key() == QtCore.Qt.Key_Delete:
+            # Get the selected cells
+            selectedIndexes = self.selectedIndexes()
+            # Sort the cells in reverse row order (Delete backwards from the end or we'll have trouble!)
+            sortedSelection = sorted(selectedIndexes, key=lambda r: r.row(), reverse=True)
+ 
+            # Since we are selecting full rows, we'll get a selection entry for each column!
+            # Track which columns have already been deleted
+            deleted_rows = []
+            for s in sortedSelection:
+                if not s.row() in deleted_rows:
+                    deleted_rows.append(s.row())
+                    self.model().removeRows(s.row(), 1)
+        else:
+            super(listWidget, self).keyPressEvent(e)
+                                                          
+                                                          
 class Login(QtWidgets.QDialog):
     def __init__(self):
         """

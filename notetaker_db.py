@@ -1,7 +1,7 @@
 import logging
 import csv
 import datetime as dt
-from PyQt5 import QtCore, QtGui, QtWidgets
+from Qt import QtCore, QtGui, QtWidgets
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import Column, Integer, String, DateTime, LargeBinary, ForeignKey, create_engine, or_
 from sqlalchemy.orm import sessionmaker
@@ -77,7 +77,7 @@ class NoteTakerSortFilterProxyModel(QtCore.QSortFilterProxyModel):
         Model used to filter the NoteTakerTableModel based on user entries
         """
         super(NoteTakerSortFilterProxyModel, self).__init__(parent)
-        self.header = ('Creation Date', 'Text', 'User', 'Last Modified')
+        self.header = ('Creation Date', 'Text', 'User', 'Last Modified', 'Attachments')
 
     def update_table_view(self, filter_txt):
         search = QtCore.QRegExp(filter_txt, QtCore.Qt.CaseInsensitive, QtCore.QRegExp.Wildcard)
@@ -87,6 +87,7 @@ class NoteTakerSortFilterProxyModel(QtCore.QSortFilterProxyModel):
     def export_data_filt(self, path):
         export_list = []
         for row in range(self.rowCount()):
+            logger.debug(row)
             rowdata = {}
             for col in range(self.columnCount()):
                 rowdata[self.header[col]] = self.data(self.createIndex(row, col))
@@ -106,7 +107,7 @@ class NoteTakerTableModel(QtCore.QAbstractTableModel):
         super(NoteTakerTableModel, self).__init__(parent)
         self.session = None
         self.datatable = [[]]
-        self.header = ('Creation Date', 'Text', 'User', 'Last Modified')
+        self.header = ('Creation Date', 'Text', 'User', 'Last Modified', 'Attachments')
 
         self.initiate_db_connection(db_type, db)
 
@@ -133,33 +134,24 @@ class NoteTakerTableModel(QtCore.QAbstractTableModel):
             logger.debug('Completed db connection to "{}"'.format(db))
             return '{}'.format(db)
 
-    def commit_new_note(self, text, user):
+    def commit_new_note(self, text, user, attach=None):
         logger.debug('Initiating commit of new note')
         # TODO: Check for any attachments and add if present
         datetime = dt.datetime.now()
         logger.debug('Trying to add note "{}", "{}", "{}"'.format(datetime, text, user))
         note = Note(datetime=datetime, text=text, user=user, last_update=datetime)
-        try:
-            self.session.add(note)
-            self.session.commit()
-        except Exception as e:
-            logger.error('Failed to commit: {}'.format(repr(e)))
-            raise
-        else:
-            logger.info('Committed note')
-            self.refresh_data()
-            return 'Note Committed Successfully'
+        self.session.add(note)
+        self.session.commit()
+        logger.info('Committed note')
+        self.refresh_data()
+        return 'Note Committed Successfully'
 
     def refresh_data(self):
         # TODO: Add timer to refresh data automatically. Add option to set time in preferences dialog
-        try:
-            self.layoutAboutToBeChanged.emit()
-            self.datatable = [d for d in self.session.query(Note).order_by(Note.datetime).all()]
-        except AttributeError:
-            raise
-        else:
-            logger.debug('Fetched new data')
-            self.layoutChanged.emit()
+        self.layoutAboutToBeChanged.emit()
+        self.datatable = [d for d in self.session.query(Note).order_by(Note.datetime).all()]
+        logger.debug('Fetched new data')
+        self.layoutChanged.emit()
 
     def export_data(self, path):
         # Export table data to csv. Assumes path is valid and will be overwritten if exists
@@ -196,7 +188,7 @@ class NoteTakerTableModel(QtCore.QAbstractTableModel):
             j = QModelIndex.column()
             return '{}'.format(self.datatable[i][j])
         else:
-            return QtCore.QVariant()
+            return None
 
     def flags(self, QModelIndex):
         return QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled
