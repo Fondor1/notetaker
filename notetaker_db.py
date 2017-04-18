@@ -2,6 +2,7 @@ import logging
 import csv
 import datetime as dt
 from Qt import QtCore, QtGui, QtWidgets
+from collections import defaultdict
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import Column, Integer, String, DateTime, LargeBinary, ForeignKey, create_engine, or_
 from sqlalchemy.orm import sessionmaker
@@ -15,8 +16,8 @@ Base = declarative_base()
 class User(Base):
     __tablename__ = 'user'
 
-    id = Column(Integer, primary_key=True)
-    username = Column(String)
+    user_id = Column(Integer, primary_key=True)
+    username = Column(String, unique=True)
     pwhash = Column(String)
 
     def __repr__(self):
@@ -27,33 +28,52 @@ class Note(Base):
     __tablename__ = 'note'
     
     # Contains only the latest edited notes for any given item 
-    id = Column(Integer, primary_key=True)
+    note_id = Column(Integer, primary_key=True)
     datetime = Column(DateTime)
     text = Column(String)
     user = Column(String, ForeignKey('user.username'))
     last_update = Column(DateTime)
     
     def __repr__(self):
-        return "<Note(datetime='{}', text='{}', user='{}', last_update='{}')>"\
-            .format(self.datetime, self.text, self.user, self.last_update)
+        return "<Note(note_id='{}', datetime='{}', text='{}', user='{}', last_update='{}')>"\
+            .format(self.note_id, self.datetime, self.text, self.user, self.last_update)
 
     def __getitem__(self, item):
-        return (self.datetime, self.text, self.user, self.last_update)[item]
+        return (self.note_id, self.datetime, self.text, self.user, self.last_update)[item]
 
 
 class Attachment(Base):
     __tablename__ = 'attachment'
     
-    id = Column(Integer, primary_key=True)
+    attach_id = Column(Integer, primary_key=True)
     # Filename or other identifier
     name = Column(String)
     data = Column(LargeBinary)
-    # note_id is the id of the note with which this attachment is associated
-    note_id = Column(Integer)
     
     def __repr__(self):
-        return "<Attachment(name='{}', data='BINARY', note_id='{}')>".format(self.name, self.note_id)
+        return "<Attachment(name='{}', data='BINARY')>".format(self.name)
+        
 
+class LastUpdate(Base):
+    __tablename__ = 'updatetime'
+    # Single row intended to be used to keep track of the last update/edit/insertion into the database. This field can be queried by clients
+    # to determine if the current view is the latest. It is currently the client's responsibility to check this value manually.
+    # TODO: Add a trigger to update this value automatically when a new 
+    updatetime = Column(DateTime, primary_key=True)
+
+    def __repr__(self):
+        return "<LastUpdate(updatetime='{}')>".format(self.updatetime)
+
+        
+class NoteAttachment(Base):
+    __tablename__ = 'note_attachment'
+    
+    id = Column(Integer, primary_key=True)
+    note_id = Column(Integer)
+    attach_id = Column(Integer)
+    
+    def __repr__(self):
+        return "<NoteAttachment(note_id='{}',attach_id='{}')>".format(self.note_id, self.attach_id)
 
 class Log(Base):
     __tablename__ = 'log'
@@ -61,7 +81,7 @@ class Log(Base):
     # Log records every note transaction (both new and edits)
     # Does not handle attachments
     # TODO: Set up triggers to support automatic logging
-    id = Column(Integer, primary_key=True)
+    log_id = Column(Integer, primary_key=True)
     # timestamp when the insertion/edit was made
     timestamp = Column(DateTime)
     # text is the 
@@ -134,13 +154,21 @@ class NoteTakerTableModel(QtCore.QAbstractTableModel):
             logger.debug('Completed db connection to "{}"'.format(db))
             return '{}'.format(db)
 
-    def commit_new_note(self, text, user, attach=None):
+    def commit_new_note(self, text, user, attachments=None):
         logger.debug('Initiating commit of new note')
         # TODO: Check for any attachments and add if present
+        # TODO: Use NIST time instead of trusting the computer time
         datetime = dt.datetime.now()
-        logger.debug('Trying to add note "{}", "{}", "{}"'.format(datetime, text, user))
+        logger.debug('Attempting to add note "{}", "{}", "{}"'.format(datetime, text, user))
         note = Note(datetime=datetime, text=text, user=user, last_update=datetime)
         self.session.add(note)
+        if attachments:
+            attach_list = []
+            for attach in attachments:
+                logger.debug('Attempting to add attachment "{}"'.format(attach))
+                with open(attach, 'rb') as fl:
+                    attach_list.append(Attachment(name=attach, ))
+        
         self.session.commit()
         logger.info('Committed note')
         self.refresh_data()
@@ -149,7 +177,19 @@ class NoteTakerTableModel(QtCore.QAbstractTableModel):
     def refresh_data(self):
         # TODO: Add timer to refresh data automatically. Add option to set time in preferences dialog
         self.layoutAboutToBeChanged.emit()
-        self.datatable = [d for d in self.session.query(Note).order_by(Note.datetime).all()]
+        noteslist = self.session.query(Note).order_by(Note.datetime).all()
+        attachlist = self.session.query(Attachment.name).order_by(Note.datetime).all()
+        attach_dict = defaultdict(list)
+        notes_attach_list = [(item.note_id, item.attach_id) for item in self.session.query(NoteAttachment).all()]
+        for k,v in notes_attach_list:
+            # Merge all attachments into a single list for each note_id 
+            attach_dict[k].append(v)
+        for note in noteslist:
+            if note.note_id in attach_dict.keys():
+                
+        logger.debug(noteslist)
+        # attachlist = self.session.query()
+        # self.datatable = 
         logger.debug('Fetched new data')
         self.layoutChanged.emit()
 

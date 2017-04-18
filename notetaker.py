@@ -55,6 +55,7 @@ class NoteTaker(QtWidgets.QMainWindow):
         self.dbconfigLabel.setText('Notes Database Path')
         self.dbconfigHorizontalLayout.addWidget(self.dbconfigLabel)
         self.dbconfigLineEdit = QtWidgets.QLineEdit(self.dbconfigFrame)
+        self.dbconfigComboBox = QtWidgets.QComboBox(self.dbconfigFrame)
         # TODO: Remember database from previous session and open automatically
         # TODO: Make this field an editable dropdown that remembers up to N previous databases
         self.dbconfigLineEdit.setText('notes.db')
@@ -283,6 +284,8 @@ class NoteTaker(QtWidgets.QMainWindow):
             self.setWindowTitle('{} - {} - {}'.format(self.program_title, self.current_user, self.current_db))
             self.statusbar.showMessage('Successfully connected to "{}"'.format(self.current_db), 10000)
             self.tableView.scrollToBottom()
+            # Ensure user logs in again when a new database is loaded
+            self.current_user = None
 
     def filter_view(self):
         filter_txt = self.filterLineEdit.text()
@@ -328,19 +331,21 @@ class PlainTextEditWithAttachments(QtWidgets.QPlainTextEdit):
         logger.debug(repr(e.mimeData))
         e.accept()
         
-                if e.mimeData().hasFormat('text/uri-list'):
+        if e.mimeData().hasFormat('text/uri-list'):
             files = str(e.mimeData().data('text/uri-list')).split('\r\n')
             files = [f.rstrip('\x00\r\n').replace('file:///', '') for f in files]
+            logger.debug('Found the following files:')
             for f in files:
-                if f:
-                    ext = os.path.splitext(f)[1].lower()
-                    if ext in ['.xls', '.xlsx', '.txt']:
-                        e.accept()
-                        return
-                    if ext == '.txt':
-                        e.accept()
-                        return
-            e.ignore()
+                logger.debug(repr(f))
+                # if f:
+                    # ext = os.path.splitext(f)[1].lower()
+                    # if ext in ['.xls', '.xlsx', '.txt']:
+                        # e.accept()
+                        # return
+                    # if ext == '.txt':
+                        # e.accept()
+                        # return
+            # e.ignore()
 
 class listWidget(QtWidgets.QListWidget):
     def __init__(self, parent=None):
