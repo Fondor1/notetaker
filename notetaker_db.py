@@ -155,6 +155,10 @@ class NoteTakerTableModel(QtCore.QAbstractTableModel):
             return '{}'.format(db)
 
     def commit_new_note(self, text, user, attachments=None):
+        """
+        'attachments' is expecting a list of file paths
+        """
+        
         logger.debug('Initiating commit of new note')
         # TODO: Check for any attachments and add if present
         # TODO: Use NIST time instead of trusting the computer time
@@ -167,7 +171,8 @@ class NoteTakerTableModel(QtCore.QAbstractTableModel):
             for attach in attachments:
                 logger.debug('Attempting to add attachment "{}"'.format(attach))
                 with open(attach, 'rb') as fl:
-                    attach_list.append(Attachment(name=attach, ))
+                    # TODO: Only keep filename/extension, not full path
+                    attach_list.append(Attachment(name=attach, data=buffer(fl.read())))
         
         self.session.commit()
         logger.info('Committed note')
@@ -177,19 +182,28 @@ class NoteTakerTableModel(QtCore.QAbstractTableModel):
     def refresh_data(self):
         # TODO: Add timer to refresh data automatically. Add option to set time in preferences dialog
         self.layoutAboutToBeChanged.emit()
+        # Collect a list ir dict of all notes and the filenames for all attachments
         noteslist = self.session.query(Note).order_by(Note.datetime).all()
-        attachlist = self.session.query(Attachment.name).order_by(Note.datetime).all()
-        attach_dict = defaultdict(list)
+        attach_filename_dict = dict((a.attach_id, a.name) for a in self.session.query(Attachment.attach_id, Attachment.name).all())
+        # Also generate a list holding the relationship between the notes and associated attachments
         notes_attach_list = [(item.note_id, item.attach_id) for item in self.session.query(NoteAttachment).all()]
+        
+        attach_dict = defaultdict(list)
+        self.datatable = []
         for k,v in notes_attach_list:
             # Merge all attachments into a single list for each note_id 
             attach_dict[k].append(v)
+        # Run through all notes, appending any attachments found
         for note in noteslist:
             if note.note_id in attach_dict.keys():
-                
-        logger.debug(noteslist)
-        # attachlist = self.session.query()
-        # self.datatable = 
+                self.datatable.append([note.datetime, 
+                                       note.text, 
+                                       note.user, 
+                                       note.last_update]+
+                                      ['\n'.join(attach_filename_dict[a] for a in attach_dict[note.note_id])])
+            else:
+                self.datatable.append([note.datetime, note.text, note.user, note.last_update] + [''])
+
         logger.debug('Fetched new data')
         self.layoutChanged.emit()
 
