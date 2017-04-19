@@ -107,16 +107,15 @@ class NoteTakerSortFilterProxyModel(QtCore.QSortFilterProxyModel):
     def export_data_filt(self, path):
         export_list = []
         for row in range(self.rowCount()):
-            logger.debug(row)
             rowdata = {}
             for col in range(self.columnCount()):
-                rowdata[self.header[col]] = self.data(self.createIndex(row, col))
+                rowdata[self.header[col]] = self.data(self.index(row, col))
             export_list.append(rowdata)
-        with open(path, 'w') as fl:
+        with open(path, 'w', newline='') as fl:
             writer = csv.DictWriter(fl, fieldnames=self.header)
-            writer.writeHeader()
-            for line in rowdata:
-                writer.writeline(line)                
+            writer.writeheader()
+            for line in export_list:
+                writer.writerow(line)
 
 
 class NoteTakerTableModel(QtCore.QAbstractTableModel):
@@ -209,10 +208,11 @@ class NoteTakerTableModel(QtCore.QAbstractTableModel):
 
     def export_data(self, path):
         # Export table data to csv. Assumes path is valid and will be overwritten if exists
-        with open(path, 'wb') as stream:
+        with open(path, 'w', newline='') as stream:
             writer = csv.writer(stream)
             rowcount = len(self.datatable)
             colcount = len(self.datatable[0])
+            writer.writerow(self.header)
             for row in range(rowcount):
                 rowdata = []
                 for column in range(colcount):

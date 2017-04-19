@@ -18,7 +18,7 @@ class NoteTaker(QtWidgets.QMainWindow):
     display tables and inline images. NoteTaker also supports arbitrary attachments.
     """
 
-    version = '0.1.0'
+    version = '0.1.2'
 
     def __init__(self, parent=None):
         super(NoteTaker, self).__init__(parent)
@@ -41,7 +41,6 @@ class NoteTaker(QtWidgets.QMainWindow):
     def setup_ui(self):
         # Set up basic dimensions and central layout
         self.program_title = 'NoteTaker'
-        self.setWindowTitle(self.program_title)
         self.resize(850, 600)
         self.centralwidget = QtWidgets.QWidget(self)
         self.verticalLayout = QtWidgets.QVBoxLayout(self.centralwidget)
@@ -56,15 +55,20 @@ class NoteTaker(QtWidgets.QMainWindow):
         self.dbconfigHorizontalLayout.addWidget(self.dbconfigLabel)
         self.dbconfigLineEdit = QtWidgets.QLineEdit(self.dbconfigFrame)
         self.dbconfigComboBox = QtWidgets.QComboBox(self.dbconfigFrame)
+        self.dbconfigComboBox.setEditable(True)
+        self.dbconfigComboBox.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+        self.dbconfigComboBox.setLineEdit(self.dbconfigLineEdit)
         # TODO: Remember database from previous session and open automatically
         # TODO: Make this field an editable dropdown that remembers up to N previous databases
         self.dbconfigLineEdit.setText('notes.db')
         # Set up data model
         self.sourceTableModel = NoteTakerTableModel(self.db_type, self.dbconfigLineEdit.text())
+        self.current_db = self.dbconfigLineEdit.text()
         self.proxyTableModel = NoteTakerSortFilterProxyModel()
         self.proxyTableModel.setSourceModel(self.sourceTableModel)
         # TODO: Add dropdown to select db type (or detect automatically)
-        self.dbconfigHorizontalLayout.addWidget(self.dbconfigLineEdit)
+        # self.dbconfigHorizontalLayout.addWidget(self.dbconfigLineEdit)
+        self.dbconfigHorizontalLayout.addWidget(self.dbconfigComboBox)
         self.browseDatabaseButton = QtWidgets.QPushButton(self.dbconfigFrame)
         self.browseDatabaseButton.setText('Browse for database')
         self.browseDatabaseButton.clicked.connect(self.browse_db_connection)
@@ -117,6 +121,7 @@ class NoteTaker(QtWidgets.QMainWindow):
         self.horizontalLayout.addWidget(self.attachmentWidget)
         self.commitButton = QtWidgets.QPushButton(self.noteFrame)
         self.commitButton.setText('Commit')
+        self.commitButton.setStatusTip('Click or press Control+Enter to commit this message to the database')
         self.commitButton.clicked.connect(self.commit_new_note)
         QtWidgets.QShortcut(QtGui.QKeySequence('Ctrl+Return'), self, self.commit_new_note)
         QtWidgets.QShortcut(QtGui.QKeySequence('Ctrl+Enter'), self, self.commit_new_note)
@@ -181,7 +186,10 @@ class NoteTaker(QtWidgets.QMainWindow):
         self.menubar.addAction(self.menuEdit.menuAction())
         self.menubar.addAction(self.menuHelp.menuAction())
 
+        self.setWindowTitle('{} - {} - {}'.format(self.program_title, self.current_user, self.current_db))
+        
         self.setCentralWidget(self.centralwidget)
+        
 
     def browse_db_connection(self):
         fl = QtWidgets.QFileDialog.getOpenFileName(caption='Open database file', directory='')
@@ -206,7 +214,7 @@ class NoteTaker(QtWidgets.QMainWindow):
             
     def onExportClicked(self):
         # TODO: Pop up a window if data is filtered and ask if user would like filtered or all data exported
-        if not self.filterLineEdit.text() == '':
+        if self.filterLineEdit.text() != '':
             msg = QtWidgets.QMessageBox()
             msg.setIcon(QtWidgets.QMessageBox.Question)
             msg.setText('The current view is filtered. Select Yes to export only the visible data or No to export all available data.')
@@ -220,40 +228,20 @@ class NoteTaker(QtWidgets.QMainWindow):
             else:
                 logger.debug('User cancelled save')
                 return
+        else:
+            export_flag = 'all'
  
         path = QtWidgets.QFileDialog.getSaveFileName(self, 'Save File', '', 'CSV (*.csv)')[0]
         if path != '':
-            if os.path.exists(path):
-                # Check for existing
-                # Ensure extension is added properly
-                # If all OK, pass to self.sourceTableModel.export_data(path)
-                repeat = True
-                while repeat and path != '':
-                    # Path exists, overwrite?
-                    msg = QtWidgets.QMessageBox()
-                    msg.setIcon(QtWidgets.QMessageBox.Question)
-                    msg.setText('The file "{}" already exists. Overwrite?')
-                    msg.setWindowTitle('Overwrite existing file?')
-                    msg.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No | QtWidgets.QMessageBox.Cancel)
-                    result = msg.exec_()
-                    # Handle choice. If cancel, stop. If Yes, overwrite, if no, prompt for new
-                    if result == QtWidgets.QMessageBox.Yes:
-                        repeat = False
-                    elif result == QtWidgets.QMessageBox.No:
-                        path = QtWidgets.QFileDialog.getSaveFileName(self, 'Save File', '', 'CSV (*.csv)')[0]
-                    else:
-                        logger.debug('User cancelled save')
-                        return
-            
             logger.debug('Found a file to save to: {}'.format(path))
             if export_flag == 'filtered':
                 self.proxyTableModel.export_data_filt(path)
             elif export_flag == 'all':
                 self.sourceTableModel.export_data(path)
             else:
-                logger.warning('Export option "{}" not configured'.format(repr(export_flag)))
-            
-            
+                logger.warning('Export option "{}" not configured'.format(repr(export_flag))) 
+            logger.debug('Export complete')
+            self.statusbar.showMessage('Export complete! File saved as "{}"'.format(path))
         else:
             logger.debug('User cancelled save')
             
@@ -283,13 +271,14 @@ class NoteTaker(QtWidgets.QMainWindow):
             self.current_db = result
             self.setWindowTitle('{} - {} - {}'.format(self.program_title, self.current_user, self.current_db))
             self.statusbar.showMessage('Successfully connected to "{}"'.format(self.current_db), 10000)
+            self.tableView.resizeRowsToContents()
             self.tableView.scrollToBottom()
             # Ensure user logs in again when a new database is loaded
             self.current_user = None
 
     def filter_view(self):
         filter_txt = self.filterLineEdit.text()
-        logger.debug(filter_txt)
+        logger.debug('Filtering text "{}"'.format(filter_txt))
         self.proxyTableModel.update_table_view(filter_txt)
 
     def closeEvent(self, *args, **kwargs):
