@@ -1,3 +1,5 @@
 *.lnk
 *.log
 *.pyc
+*.xml
+*.iml
