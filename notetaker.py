@@ -101,7 +101,6 @@ class NoteTaker(QtWidgets.QMainWindow):
         self.tableView = QtWidgets.QTableView(self.splitter)
         self.tableView.setModel(self.proxyTableModel)
         self.tableView.setFont(QtGui.QFont('Courier New'))   # Probably not cross platform
-        self.tableView.resizeColumnsToContents()
         self.tableView.setSortingEnabled(True)
         # TODO: Fix sorting (most recent at bottom)
         self.tableView.horizontalHeader().setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
@@ -209,6 +208,7 @@ class NoteTaker(QtWidgets.QMainWindow):
             self.tableView.resizeColumnToContents(0)
             self.tableView.resizeColumnToContents(2)
             self.tableView.resizeColumnToContents(3)
+            self.tableView.resizeColumnToContents(4)
             self.tableView.resizeRowsToContents()
             self.tableView.scrollToBottom()
             
@@ -271,9 +271,14 @@ class NoteTaker(QtWidgets.QMainWindow):
             self.current_db = result
             self.setWindowTitle('{} - {} - {}'.format(self.program_title, self.current_user, self.current_db))
             self.statusbar.showMessage('Successfully connected to "{}"'.format(self.current_db), 10000)
+            self.tableView.resizeColumnToContents(0)
+            self.tableView.resizeColumnToContents(2)
+            self.tableView.resizeColumnToContents(3)
+            self.tableView.resizeColumnToContents(4)
             self.tableView.resizeRowsToContents()
             self.tableView.scrollToBottom()
             # Ensure user logs in again when a new database is loaded
+            # TODO: Determine if current database is being just reloaded or if a new database is being requested. If just reloaded, no need to re-ask for username
             self.current_user = None
 
     def filter_view(self):
