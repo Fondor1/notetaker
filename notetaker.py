@@ -2,7 +2,7 @@
 import sys
 import logging
 import os.path
-from Qt import QtCore, QtGui, QtWidgets
+from Qt import QtCore, QtGui, QtWidgets, __binding__
 from notetaker_db import NoteTakerSortFilterProxyModel, NoteTakerTableModel
 
 logging.basicConfig(level=logging.DEBUG)
@@ -104,9 +104,16 @@ class NoteTaker(QtWidgets.QMainWindow):
         self.tableView.resizeColumnsToContents()
         self.tableView.setSortingEnabled(True)
         # TODO: Fix sorting (most recent at bottom)
-        self.tableView.horizontalHeader().setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
+        # __binding__ checks are to handle a caveat https://github.com/mottosso/Qt.py/blob/master/CAVEATS.md#qtwidgetsqheaderviewsetresizemode
+        if __binding__ in ("PyQt4", "PySide"):
+            self.tableView.horizontalHeader().setResizeMode(1, QtWidgets.QHeaderView.Stretch)
+        else:
+            self.tableView.horizontalHeader().setSectionResizeMode(1, QtWidgets.QHeaderView.Stretch)
         self.tableView.sortByColumn(0, QtCore.Qt.AscendingOrder)
-        self.tableView.verticalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeToContents)
+        if __binding__ in ("PyQt4", "PySide"):
+            self.tableView.verticalHeader().setResizeMode(QtWidgets.QHeaderView.ResizeToContents)
+        else:
+            self.tableView.verticalHeader().setSectionResizeMode(QtWidgets.QHeaderView.ResizeToContents)
         self.noteFrame = QtWidgets.QFrame(self.splitter)
         self.noteFrame.setFrameShape(QtWidgets.QFrame.StyledPanel)
         self.noteFrame.setFrameShadow(QtWidgets.QFrame.Raised)
