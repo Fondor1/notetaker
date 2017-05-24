@@ -130,9 +130,9 @@ class NoteTakerTableModel(QtCore.QAbstractTableModel):
 
         self.initiate_db_connection(db_type, db)
 
-        self.dataUpdateTimer = QtCore.QTimer(self)
-        self.dataUpdateTimer.timeout.connect(self.refresh_data)
-        self.dataUpdateTimer.startTimer(update_rate)
+        # self.dataUpdateTimer = QtCore.QTimer(self)
+        # self.dataUpdateTimer.timeout.connect(self.refresh_data)
+        # self.dataUpdateTimer.startTimer(update_rate)
 
     def initiate_db_connection(self, db_type, db):
         # Connect to the database specified
